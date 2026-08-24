@@ -1,0 +1,26 @@
+INDOKIDS BRANCH PERFORMANCE COMMAND CENTER — QUICK START
+
+WINDOWS (pertama kali)
+1. Extract ZIP.
+2. Pastikan Python 3.11 / 3.12 terinstall.
+3. Double click setup_windows.bat.
+4. Setelah selesai, double click run_app.bat.
+5. Browser akan membuka aplikasi.
+
+UPLOAD URUTAN
+1. Stock Awal — wajib
+2. Kartu Stok — wajib
+3. Histori Pembelian — opsional tetapi sangat disarankan
+4. Target Cabang — opsional untuk Target Chase
+5. Klik "Proses Data & Jalankan Analisis".
+
+CATATAN
+- Command Center dan Target Chase selalu menghitung total cabang.
+- Filter Supplier/Subdept/Kel Barang/Sub Kel berlaku pada halaman detail.
+- Profitability menggunakan Estimated Management HPP dan sumber HPP ditampilkan transparan.
+
+
+V2.2 AI:
+- Jalankan setup_windows.bat sekali setelah upgrade agar google-genai terpasang.
+- Pemakaian harian: double-click RUN_INDOKIDS.bat.
+- Di AI Presentation pilih Google Gemini atau OpenAI.
