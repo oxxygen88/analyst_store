@@ -1,3 +1,32 @@
+# V2.5 — Explicit Filter Processing
+
+- Added **Proses Data Sesuai Filter** button in the sidebar.
+- Sidebar selections are now draft filters until explicitly processed.
+- Added **Reset Filter** button and active-filter indicator.
+- Added active SKU scope count.
+- Detail pages use only the committed/applied filter state.
+- Ask Anything by AI automatically switches to **Ikuti Filter Produk Sidebar** after a product filter is processed.
+- Clearing filters automatically returns Ask AI to **Seluruh Cabang**.
+- AI supporting-data state is cleared when filter scope changes to prevent stale answers/tables.
+- Regression tests: 11/11 passed.
+
+# V2.4 — Ask Anything by AI
+
+- Added `Ask Anything by AI` menu with Gemini/OpenAI provider selection.
+- Added deterministic local fact-pack/query routing for sales, target, product, inventory, Pareto, movement, supplier/category, profitability, and anomalies.
+- Raw transaction rows are not sent directly to AI providers.
+- Added chat history/follow-up support and previous-period scope inheritance.
+- Added supporting-data preview and multi-sheet Excel download for the last AI answer.
+- Added Streamlit Secrets support for `OPENAI_API_KEY` and `GEMINI_API_KEY` in both Ask AI and AI Presentation menus.
+- Historical inventory questions use the requested period-end snapshot.
+- Regression suite expanded to 11 tests; all passing.
+
+# V2.3 — Streamlit Cloud Compatibility Hotfix
+
+- Updated PyArrow requirement from `pyarrow>=16,<22` to `pyarrow>=23,<26`.
+- Fixes Streamlit Community Cloud deployment on Python 3.14 where PyArrow 21 was built from source and failed because CMake was unavailable.
+- Added `STREAMLIT_CLOUD_DEPLOY.md` with deployment and Python-version guidance.
+
 # Changelog V2.2
 
 ## Google Gemini AI

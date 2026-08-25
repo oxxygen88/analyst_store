@@ -1,4 +1,4 @@
-# INDOKIDS Branch Performance Command Center — V2.2
+# INDOKIDS Branch Performance Command Center — V2.4
 
 Aplikasi analisis cabang retail untuk **Monitor → Diagnose → Act**, dengan fokus target achievement, Pareto product opportunity, inventory health, profitability, dan action list.
 
@@ -12,10 +12,26 @@ Aplikasi analisis cabang retail untuk **Monitor → Diagnose → Act**, dengan f
 6. **Profitability** — Estimated HPP, gross profit, gross margin, dan HPP source coverage.
 7. **Category & Supplier** — revenue share vs inventory share / productivity index.
 8. **SKU 360** — histori movement, revenue, profit, stock balance, cover, dan **filter inventory status**.
-9. **AI Presentation Generator** — pilih **Google Gemini atau OpenAI** untuk membuat insight + PowerPoint `.pptx` management brief berbasis data aplikasi.
-10. **Data & Anomaly Center** — negative stock, zero price, mismatch subtotal, duplicate suspicion, missing HPP, unknown movement.
+9. **Ask Anything by AI** — chat Business Analyst berbasis data aplikasi dengan provider **Google Gemini / OpenAI**, fact-pack lokal, supporting tables, dan download Excel.
+10. **AI Presentation Generator** — pilih **Google Gemini atau OpenAI** untuk membuat insight + PowerPoint `.pptx` management brief berbasis data aplikasi.
+11. **Data & Anomaly Center** — negative stock, zero price, mismatch subtotal, duplicate suspicion, missing HPP, unknown movement.
 
 
+
+
+## Update V2.4 — Ask Anything by AI
+
+- Tambah menu **Ask Anything by AI** sebagai Business Analyst chat berbasis data cabang yang sudah diproses aplikasi.
+- Provider AI: **Google Gemini** atau **OpenAI**, sama seperti menu AI Presentation.
+- Aplikasi membangun **fact pack lokal** berdasarkan pertanyaan: periode, supplier/category/SKU yang disebut, sales, target, Pareto, inventory, movement, profitability, dan anomaly.
+- Raw transaction tidak dikirim langsung ke provider AI. Hanya hasil aggregasi/tabel relevan yang dikirim.
+- Mendukung pertanyaan follow-up dengan chat history dan pewarisan periode/scope untuk referensi seperti “supplier itu” atau “bulan tersebut”.
+- Mendukung filter status inventory seperti `OVERSTOCK`, `DEAD`, `SLOW`, `STOCKOUT`, `NEGATIVE`, `NO_SALES`.
+- Data pendukung jawaban dapat diperiksa langsung dan **di-download sebagai Excel multi-sheet**.
+- Tambah pilihan gaya jawaban: **Detail**, **Ringkas**, dan **Management**.
+- Mendukung **Streamlit Secrets** (`OPENAI_API_KEY`, `GEMINI_API_KEY`) sehingga key tidak perlu diketik ulang saat deployment cloud.
+- AI Presentation juga otomatis membaca API key dari Streamlit Secrets jika tersedia.
+- Pertanyaan historis menghitung inventory snapshot sesuai akhir periode yang ditanyakan, bukan selalu kondisi hari terakhir data.
 
 
 ## Update V2.2 — Google Gemini AI
@@ -219,3 +235,7 @@ indokids_branch_command_center/
 ├── templates/
 └── tests/
 ```
+
+## Filter Produk V2.5
+
+Filter produk menggunakan mekanisme **draft → apply**. Pilih Supplier/Subdept/Kel Barang/Sub Kel di sidebar, lalu klik **Proses Data Sesuai Filter**. Halaman detail baru menggunakan filter setelah tombol tersebut diklik. Gunakan **Reset Filter** untuk kembali ke seluruh data. Jika filter aktif, menu Ask Anything by AI otomatis menggunakan scope **Ikuti Filter Produk Sidebar**.

@@ -27,6 +27,7 @@ from src.analytics import (
 from src.cache_store import save_bundle_parquet
 from src.insights import management_alerts
 from src.ai_presentation import ai_runtime_info, build_pptx, generate_ai_insights, presentation_context
+from src.ai_analyst import build_question_context, generate_analyst_answer, tables_to_excel
 from src.io import load_raw_inputs
 from src.pipeline import AnalysisBundle, build_bundle
 from src.utils import file_fingerprint, pct, rupiah, style_dataframe
@@ -154,6 +155,60 @@ def apply_product_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     return out.copy()
 
 
+def _clean_filter_dict(filters: dict) -> dict:
+    """Normalize filter values so session-state comparisons stay deterministic."""
+    out = {}
+    for key in ["supplier", "subdept", "kel_barang", "sub_kel"]:
+        values = filters.get(key, []) if isinstance(filters, dict) else []
+        out[key] = [str(v) for v in values if str(v).strip()]
+    return out
+
+
+def _filter_summary(filters: dict) -> str:
+    labels = {
+        "supplier": "Supplier",
+        "subdept": "Subdept",
+        "kel_barang": "Kel Barang",
+        "sub_kel": "Sub Kel",
+    }
+    parts = []
+    for key, label in labels.items():
+        values = filters.get(key, [])
+        if values:
+            preview = ", ".join(map(str, values[:2]))
+            if len(values) > 2:
+                preview += f" +{len(values)-2}"
+            parts.append(f"{label}: {preview}")
+    return " · ".join(parts) if parts else "Tidak ada filter produk (seluruh data)"
+
+
+def _apply_product_filter_state():
+    """Commit current sidebar widget selections as the filter used by analytics pages."""
+    draft = _clean_filter_dict({
+        "supplier": st.session_state.get("f_supplier", []),
+        "subdept": st.session_state.get("f_subdept", []),
+        "kel_barang": st.session_state.get("f_kel", []),
+        "sub_kel": st.session_state.get("f_subkel", []),
+    })
+    st.session_state["applied_product_filters"] = draft
+    st.session_state["filter_apply_counter"] = int(st.session_state.get("filter_apply_counter", 0)) + 1
+    st.session_state["ask_scope_mode"] = "Ikuti Filter Produk Sidebar" if any(draft.values()) else "Seluruh Cabang"
+    st.session_state.pop("business_ai_last_tables", None)
+    st.session_state.pop("business_ai_last_scope", None)
+
+
+def _reset_product_filter_state():
+    """Clear draft and applied filters before Streamlit reruns the script."""
+    for key in ["f_supplier", "f_subdept", "f_kel", "f_subkel"]:
+        st.session_state[key] = []
+    st.session_state["applied_product_filters"] = {
+        "supplier": [], "subdept": [], "kel_barang": [], "sub_kel": []
+    }
+    st.session_state["ask_scope_mode"] = "Seluruh Cabang"
+    st.session_state.pop("business_ai_last_tables", None)
+    st.session_state.pop("business_ai_last_scope", None)
+
+
 def sidebar_navigation(bundle: AnalysisBundle):
     st.sidebar.markdown("### INDOKIDS Analytics")
     st.sidebar.caption(f"Data: {bundle.min_date:%d %b %Y} – {bundle.max_date:%d %b %Y}")
@@ -175,21 +230,85 @@ def sidebar_navigation(bundle: AnalysisBundle):
             "Profitability",
             "Category & Supplier",
             "SKU 360",
+            "Ask Anything by AI",
             "AI Presentation",
             "Data & Anomaly Center",
         ],
     )
-    with st.sidebar.expander("Filter Produk (halaman detail)"):
-        st.caption("Command Center dan Target Chase tetap menghitung total cabang.")
-        suppliers = st.multiselect("Supplier", sorted(x for x in bundle.master["supplier"].dropna().unique() if str(x).strip()), key="f_supplier")
-        subdepts = st.multiselect("Subdept", sorted(x for x in bundle.master["subdept"].dropna().unique() if str(x).strip()), key="f_subdept")
-        kel = st.multiselect("Kel Barang", sorted(x for x in bundle.master["kel_barang"].dropna().unique() if str(x).strip()), key="f_kel")
-        subkel = st.multiselect("Sub Kel", sorted(x for x in bundle.master["sub_kel"].dropna().unique() if str(x).strip()), key="f_subkel")
-    filters = {"supplier": suppliers, "subdept": subdepts, "kel_barang": kel, "sub_kel": subkel}
+
+    # Applied filters are intentionally separated from widget/draft filters.
+    # This makes it explicit when the user wants the application to recalculate
+    # detail pages using a new filter combination.
+    if "applied_product_filters" not in st.session_state:
+        st.session_state["applied_product_filters"] = {
+            "supplier": [], "subdept": [], "kel_barang": [], "sub_kel": []
+        }
+
+    with st.sidebar.expander("Filter Produk (halaman detail)", expanded=True):
+        st.caption(
+            "Pilih filter, lalu klik **Proses Data Sesuai Filter**. "
+            "Command Center dan Target Chase tetap menghitung total cabang."
+        )
+
+        suppliers = st.multiselect(
+            "Supplier",
+            sorted(str(x) for x in bundle.master["supplier"].dropna().unique() if str(x).strip()),
+            key="f_supplier",
+        )
+        subdepts = st.multiselect(
+            "Subdept",
+            sorted(str(x) for x in bundle.master["subdept"].dropna().unique() if str(x).strip()),
+            key="f_subdept",
+        )
+        kel = st.multiselect(
+            "Kel Barang",
+            sorted(str(x) for x in bundle.master["kel_barang"].dropna().unique() if str(x).strip()),
+            key="f_kel",
+        )
+        subkel = st.multiselect(
+            "Sub Kel",
+            sorted(str(x) for x in bundle.master["sub_kel"].dropna().unique() if str(x).strip()),
+            key="f_subkel",
+        )
+
+        draft_filters = _clean_filter_dict({
+            "supplier": suppliers,
+            "subdept": subdepts,
+            "kel_barang": kel,
+            "sub_kel": subkel,
+        })
+        applied_filters = _clean_filter_dict(st.session_state.get("applied_product_filters", {}))
+
+        b_apply, b_reset = st.columns(2)
+        b_apply.button(
+            "🔄 Proses Data Sesuai Filter",
+            type="primary",
+            use_container_width=True,
+            key="apply_product_filters_btn",
+            on_click=_apply_product_filter_state,
+        )
+        b_reset.button(
+            "Reset Filter",
+            use_container_width=True,
+            key="reset_product_filters_btn",
+            on_click=_reset_product_filter_state,
+        )
+
+        applied_filters = _clean_filter_dict(st.session_state.get("applied_product_filters", {}))
+        if draft_filters != applied_filters:
+            st.warning("Pilihan filter berubah tetapi **belum diproses**. Klik tombol Proses Data Sesuai Filter.")
+        st.caption("**Filter aktif:** " + _filter_summary(applied_filters))
+        scoped_master = apply_product_filters(bundle.master, applied_filters)
+        st.caption(f"Scope aktif: **{len(scoped_master):,} SKU** dari {len(bundle.master):,} SKU master".replace(",", "."))
+
+    filters = _clean_filter_dict(st.session_state.get("applied_product_filters", {}))
     st.sidebar.divider()
     if st.sidebar.button("Ganti / Upload Ulang Data", use_container_width=True):
         st.session_state.pop("bundle", None)
         st.session_state.pop("fingerprint", None)
+        st.session_state.pop("applied_product_filters", None)
+        for key in ["f_supplier", "f_subdept", "f_kel", "f_subkel"]:
+            st.session_state.pop(key, None)
         st.rerun()
     return page, as_of, filters
 
@@ -618,6 +737,214 @@ def render_sku360(bundle: AnalysisBundle, as_of: pd.Timestamp, filters: dict):
     show_table(txs.sort_values("tgl", ascending=False)[cols].head(1000))
 
 
+
+def _streamlit_secret(name: str) -> str:
+    """Read an optional Streamlit secret without failing on local development."""
+    try:
+        value = st.secrets.get(name, "")
+    except Exception:
+        return ""
+    return str(value or "").strip()
+
+
+def render_ask_ai(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str, filters: dict):
+    st.title("Ask Anything by AI")
+    st.caption(
+        "Tanyakan apa pun tentang performa cabang. Aplikasi lebih dulu menghitung fact pack dari data yang diupload; "
+        "OpenAI/Gemini kemudian bertugas membaca fakta tersebut sebagai Business Analyst berpengalaman."
+    )
+
+    with st.expander("AI Analyst Settings", expanded=True):
+        c0, c1, c2 = st.columns([1.05, 1.2, 1.0])
+        provider_label = c0.selectbox(
+            "AI Provider",
+            ["Google Gemini", "OpenAI"],
+            index=0,
+            key="ask_ai_provider",
+        )
+        provider = "gemini" if provider_label == "Google Gemini" else "openai"
+        if provider == "gemini":
+            model = c1.selectbox(
+                "Model",
+                ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
+                index=0,
+                key="ask_gemini_model",
+            )
+            secret_key = _streamlit_secret("GEMINI_API_KEY")
+            if secret_key:
+                api_key = secret_key
+                c2.success("Gemini API Key: Streamlit Secrets")
+            else:
+                api_key = c2.text_input(
+                    "Gemini API Key",
+                    type="password",
+                    placeholder="AIza...",
+                    key="ask_gemini_api_key",
+                )
+        else:
+            model = c1.selectbox("Model", ["gpt-5.6"], index=0, key="ask_openai_model")
+            secret_key = _streamlit_secret("OPENAI_API_KEY")
+            if secret_key:
+                api_key = secret_key
+                c2.success("OpenAI API Key: Streamlit Secrets")
+            else:
+                api_key = c2.text_input(
+                    "OpenAI API Key",
+                    type="password",
+                    placeholder="sk-...",
+                    key="ask_openai_api_key",
+                )
+
+        c3, c4, c5 = st.columns([1.1, 1.1, 1.0])
+        active_filter_exists = any(bool(v) for v in filters.values())
+        if "ask_scope_mode" not in st.session_state:
+            st.session_state["ask_scope_mode"] = "Ikuti Filter Produk Sidebar" if active_filter_exists else "Seluruh Cabang"
+        scope_mode = c3.selectbox(
+            "Data Scope",
+            ["Seluruh Cabang", "Ikuti Filter Produk Sidebar"],
+            help="Setelah tombol Proses Data Sesuai Filter diklik, Ask AI otomatis mengikuti filter aktif. Target tetap branch-level.",
+            key="ask_scope_mode",
+        )
+        response_style = c4.selectbox(
+            "Gaya Jawaban",
+            ["Detail", "Ringkas", "Management"],
+            index=0,
+            key="ask_response_style",
+        )
+        c5.caption(f"As of Date\n\n**{pd.Timestamp(as_of):%d %b %Y}**")
+
+        runtime = ai_runtime_info()
+        if provider == "gemini":
+            transport = "Google GenAI SDK" if runtime["gemini_sdk"] else "HTTPS fallback"
+        else:
+            transport = "OpenAI Python SDK" if runtime["openai_sdk"] else "HTTPS fallback"
+        st.caption(f"Runtime: {transport} · API key tidak disimpan ke dataset/cache aplikasi.")
+        if scope_mode == "Ikuti Filter Produk Sidebar":
+            st.success("Ask AI memakai filter aktif: " + _filter_summary(filters))
+        else:
+            st.caption("Ask AI memakai seluruh data cabang (filter produk tidak diterapkan).")
+
+    st.info(
+        "Contoh pertanyaan: **Berapa gap target Agustus dan produk apa yang paling realistis didorong?** · "
+        "**Supplier mana revenue terbesar tetapi inventory productivity rendah?** · "
+        "**Tampilkan item OVERSTOCK dari supplier tertentu** · "
+        "**Berapa nilai mutasi keluar bulan Juli dan ke lokasi mana paling besar?**"
+    )
+
+    # Chat state.
+    if "business_ai_messages" not in st.session_state:
+        st.session_state["business_ai_messages"] = []
+    messages = st.session_state["business_ai_messages"]
+
+    top_left, top_right = st.columns([1, 4])
+    if top_left.button("🧹 Clear Chat", use_container_width=True, key="clear_business_ai"):
+        st.session_state["business_ai_messages"] = []
+        st.session_state.pop("business_ai_last_tables", None)
+        st.session_state.pop("business_ai_last_scope", None)
+        st.rerun()
+    top_right.caption(
+        "AI hanya menerima data hasil kalkulasi/aggregasi yang relevan dengan pertanyaan. Raw transaction tidak dikirim langsung ke provider AI."
+    )
+
+    for msg in messages:
+        with st.chat_message(msg.get("role", "assistant")):
+            st.markdown(msg.get("content", ""))
+
+    question = st.chat_input("Tanyakan sesuatu tentang data cabang INDOKIDS...", disabled=not bool(str(api_key or "").strip()))
+    if not question:
+        last_tables = st.session_state.get("business_ai_last_tables")
+        if last_tables:
+            with st.expander("Data pendukung jawaban terakhir", expanded=False):
+                for name, records in last_tables.items():
+                    df = pd.DataFrame(records)
+                    st.markdown(f"**{name.replace('_', ' ').title()}**")
+                    show_table(df.head(300), height=320)
+                payload = tables_to_excel({k: pd.DataFrame(v) for k, v in last_tables.items()})
+                st.download_button(
+                    "⬇️ Download data pendukung (.xlsx)",
+                    data=payload,
+                    file_name=f"INDOKIDS_{location}_{pd.Timestamp(as_of):%Y%m%d}_AI_supporting_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="download_ai_support_last",
+                )
+        return
+
+    # Display and persist user question.
+    with st.chat_message("user"):
+        st.markdown(question)
+    messages.append({"role": "user", "content": question})
+
+    use_filters = filters if scope_mode == "Ikuti Filter Produk Sidebar" else {}
+    history_text = "\n".join(
+        f"{m.get('role','user')}: {m.get('content','')}" for m in messages[-6:-1]
+    )
+    previous_scope = st.session_state.get("business_ai_last_scope")
+    inv = cached_inventory(bundle.opening, bundle.tx, bundle.purchases, as_of)
+
+    with st.chat_message("assistant"):
+        with st.spinner(f"{provider_label} sedang membaca data dan menyusun analisis..."):
+            try:
+                context, source_tables, scope = build_question_context(
+                    bundle,
+                    question,
+                    as_of,
+                    location=location,
+                    global_filters=use_filters,
+                    previous_scope=previous_scope,
+                    history_text=history_text,
+                    inventory=inv,
+                )
+                answer = generate_analyst_answer(
+                    str(api_key).strip(),
+                    model,
+                    provider,
+                    question,
+                    context,
+                    history=messages[:-1],
+                    response_style=response_style,
+                )
+                st.markdown(answer)
+                messages.append({"role": "assistant", "content": answer})
+                st.session_state["business_ai_messages"] = messages
+                st.session_state["business_ai_last_scope"] = scope
+                serial_tables = {
+                    name: df.head(300).replace({np.nan: None}).to_dict("records")
+                    for name, df in source_tables.items() if df is not None and not df.empty
+                }
+                st.session_state["business_ai_last_tables"] = serial_tables
+            except Exception as exc:
+                message = str(exc)
+                if "429" in message:
+                    st.error(
+                        f"{provider_label} tidak dapat memproses request karena quota/limit API. "
+                        "Coba provider lain atau periksa quota/billing provider."
+                    )
+                    st.caption(message)
+                elif "401" in message or "403" in message:
+                    st.error(f"{provider_label} menolak API key/request. Periksa key dan akses model.")
+                    st.caption(message)
+                else:
+                    st.error(f"AI Analyst gagal memproses pertanyaan: {message}")
+                return
+
+    last_tables = st.session_state.get("business_ai_last_tables")
+    if last_tables:
+        with st.expander("Data pendukung yang digunakan untuk jawaban ini", expanded=False):
+            for name, records in last_tables.items():
+                df = pd.DataFrame(records)
+                st.markdown(f"**{name.replace('_', ' ').title()}**")
+                show_table(df.head(300), height=320)
+            payload = tables_to_excel({k: pd.DataFrame(v) for k, v in last_tables.items()})
+            st.download_button(
+                "⬇️ Download data pendukung (.xlsx)",
+                data=payload,
+                file_name=f"INDOKIDS_{location}_{pd.Timestamp(as_of):%Y%m%d}_AI_supporting_data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_ai_support_new",
+            )
+
 def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str):
     st.title("AI Presentation Generator")
     st.caption(
@@ -639,14 +966,19 @@ def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location
                 "Gunakan Gemini API key dari Google AI Studio / Gemini API. "
                 "Provider ini terpisah dari OpenAI sehingga dapat digunakan walaupun quota OpenAI sedang habis."
             )
-            api_key = st.text_input(
-                "Gemini API Key",
-                type="password",
-                value="",
-                placeholder="AIza...",
-                help="Key hanya dipakai saat tombol Generate ditekan dan tidak ditulis ke cache/file aplikasi.",
-                key="gemini_api_key",
-            )
+            secret_key = _streamlit_secret("GEMINI_API_KEY")
+            if secret_key:
+                api_key = secret_key
+                st.success("Gemini API Key dimuat dari Streamlit Secrets.")
+            else:
+                api_key = st.text_input(
+                    "Gemini API Key",
+                    type="password",
+                    value="",
+                    placeholder="AIza...",
+                    help="Key hanya dipakai saat tombol Generate ditekan dan tidak ditulis ke cache/file aplikasi.",
+                    key="gemini_api_key",
+                )
             c1, c2, c3 = st.columns(3)
             model = c1.selectbox(
                 "Model",
@@ -660,14 +992,19 @@ def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location
                 "Gunakan OpenAI API key dari platform.openai.com. "
                 "ChatGPT Plus/Pro dan OpenAI API memiliki billing yang terpisah."
             )
-            api_key = st.text_input(
-                "OpenAI API Key",
-                type="password",
-                value="",
-                placeholder="sk-...",
-                help="Key hanya dipakai saat tombol Generate ditekan dan tidak ditulis ke cache/file aplikasi.",
-                key="openai_api_key",
-            )
+            secret_key = _streamlit_secret("OPENAI_API_KEY")
+            if secret_key:
+                api_key = secret_key
+                st.success("OpenAI API Key dimuat dari Streamlit Secrets.")
+            else:
+                api_key = st.text_input(
+                    "OpenAI API Key",
+                    type="password",
+                    value="",
+                    placeholder="sk-...",
+                    help="Key hanya dipakai saat tombol Generate ditekan dan tidak ditulis ke cache/file aplikasi.",
+                    key="openai_api_key",
+                )
             c1, c2, c3 = st.columns(3)
             model = c1.selectbox(
                 "Model",
@@ -829,6 +1166,8 @@ def main():
         render_category_supplier(bundle, as_of, filters)
     elif page == "SKU 360":
         render_sku360(bundle, as_of, filters)
+    elif page == "Ask Anything by AI":
+        render_ask_ai(bundle, as_of, location, filters)
     elif page == "AI Presentation":
         render_ai_presentation(bundle, as_of, location)
     elif page == "Data & Anomaly Center":

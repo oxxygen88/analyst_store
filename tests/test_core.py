@@ -126,3 +126,81 @@ def test_gemini_sdk_missing_uses_http_fallback():
             )
     assert result["presentation_title"] == "Gemini Test"
     assert http_call.called
+
+
+def test_ai_analyst_context_supplier_month():
+    from src.ai_analyst import build_question_context
+    from src.pipeline import AnalysisBundle
+    from src.transform import build_master, daily_movement
+
+    opening, tx, purchases, targets = synthetic_data()
+    tx = resolve_commercial_hpp(enrich_transactions(tx), opening, purchases)
+    bundle = AnalysisBundle(
+        opening=opening,
+        tx=tx,
+        purchases=purchases,
+        targets=targets,
+        master=build_master(opening, tx),
+        daily=daily_movement(tx),
+        min_date=tx["date"].min(),
+        max_date=tx["date"].max(),
+    )
+    ctx, tables, scope = build_question_context(
+        bundle,
+        "Berapa penjualan supplier S1 bulan Februari 2026?",
+        pd.Timestamp("2026-02-28"),
+        location="IDK-ATP",
+    )
+    assert scope["period"]["start"] == "2026-02-01"
+    assert scope["period"]["end"] == "2026-02-28"
+    assert ctx["applied_filters"]["supplier"] == ["S1"]
+    assert round(ctx["commercial_kpi"]["net_sales"], 2) == 400.0
+    assert "product_sales" in tables
+
+
+def test_ai_analyst_inventory_status_filter():
+    from src.ai_analyst import build_question_context
+    from src.pipeline import AnalysisBundle
+    from src.transform import build_master, daily_movement
+
+    opening, tx, purchases, targets = synthetic_data()
+    tx = resolve_commercial_hpp(enrich_transactions(tx), opening, purchases)
+    bundle = AnalysisBundle(
+        opening=opening,
+        tx=tx,
+        purchases=purchases,
+        targets=targets,
+        master=build_master(opening, tx),
+        daily=daily_movement(tx),
+        min_date=tx["date"].min(),
+        max_date=tx["date"].max(),
+    )
+    ctx, tables, scope = build_question_context(
+        bundle,
+        "Tampilkan item slow moving",
+        pd.Timestamp("2026-02-28"),
+        location="IDK-ATP",
+    )
+    assert "SLOW" in scope["status_filters"]
+    assert "inventory_detail" in tables
+    if not tables["inventory_detail"].empty:
+        assert set(tables["inventory_detail"]["inventory_status"].unique()) <= {"SLOW"}
+
+
+def test_ai_analyst_excel_export():
+    from src.ai_analyst import tables_to_excel
+    payload = tables_to_excel({"sales": pd.DataFrame({"sku": ["A"], "net_sales": [1000]})})
+    assert payload[:2] == b"PK"
+    assert len(payload) > 1000
+
+
+def test_ai_analyst_openai_fallback_mock():
+    from unittest.mock import patch
+    from src.ai_analyst import generate_analyst_answer
+    with patch("src.ai_analyst._call_openai_text", return_value="Jawaban berdasarkan data") as call:
+        out = generate_analyst_answer(
+            "sk-test", "gpt-5.6", "openai", "Berapa omzet?",
+            {"commercial_kpi": {"net_sales": 1000}}, history=[]
+        )
+    assert out == "Jawaban berdasarkan data"
+    assert call.called
