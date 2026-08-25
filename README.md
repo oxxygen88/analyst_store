@@ -1,4 +1,4 @@
-# INDOKIDS Branch Performance Command Center — V2.4
+# INDOKIDS Branch Performance Command Center — V2.6
 
 Aplikasi analisis cabang retail untuk **Monitor → Diagnose → Act**, dengan fokus target achievement, Pareto product opportunity, inventory health, profitability, dan action list.
 
@@ -19,6 +19,18 @@ Aplikasi analisis cabang retail untuk **Monitor → Diagnose → Act**, dengan f
 
 
 
+
+## Update V2.6 — Gemini 3.x Compatibility & Auto Fallback
+
+- Mengganti pilihan model Gemini lama 2.5 dengan model stabil Gemini 3.x.
+- Default baru: `gemini-3.7-flash`.
+- Fallback berjenjang: `3.7 Flash → 3.6 Flash → 3.5 Flash → 3.5 Flash-Lite`.
+- Fallback hanya terjadi ketika API menyatakan model tidak tersedia/deprecated/404 NOT_FOUND.
+- Error API key, quota 429, malformed request, atau jaringan tetap ditampilkan agar masalah asli tidak tertutupi.
+- Menghapus sampling parameter deprecated untuk Gemini 3.x agar kompatibel dengan API terbaru.
+- Session state lama yang masih menyimpan model 2.5 otomatis di-reset ke `gemini-3.7-flash`.
+- Berlaku untuk **Ask Anything by AI** dan **AI Presentation Generator**.
+
 ## Update V2.4 — Ask Anything by AI
 
 - Tambah menu **Ask Anything by AI** sebagai Business Analyst chat berbasis data cabang yang sudah diproses aplikasi.
@@ -38,7 +50,7 @@ Aplikasi analisis cabang retail untuk **Monitor → Diagnose → Act**, dengan f
 
 - Tambah provider **Google Gemini** pada menu AI Presentation.
 - Provider dapat dipilih: `Google Gemini` atau `OpenAI`.
-- Gemini default menggunakan model stabil `gemini-2.5-flash`, dengan opsi `gemini-2.5-pro` dan `gemini-2.5-flash-lite`.
+- Gemini default menggunakan `gemini-3.7-flash`, dengan fallback stabil ke `gemini-3.6-flash`, `gemini-3.5-flash`, lalu `gemini-3.5-flash-lite` bila model terpilih tidak tersedia.
 - Integrasi menggunakan package resmi `google-genai`; jika SDK tidak tersedia, aplikasi mempunyai HTTPS fallback langsung ke Gemini API.
 - API key Gemini diinput melalui field password dan tidak ditulis ke cache/file.
 - Error quota/API key dibuat ringkas tanpa traceback panjang.
@@ -68,8 +80,10 @@ Menu **AI Presentation** mendukung dua provider:
 
 ### Google Gemini
 - API key: Google AI Studio / Gemini API.
-- Default: `gemini-2.5-flash`.
-- Opsi lain: `gemini-2.5-pro`, `gemini-2.5-flash-lite`.
+- Default: `gemini-3.7-flash`.
+- Opsi lain: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`.
+- Auto-fallback hanya aktif untuk error model unavailable/deprecated; quota, API key, dan network error tidak disembunyikan.
+- Parameter sampling lama (`temperature`, `top_p`, `top_k`) tidak dikirim ke Gemini 3.x.
 - SDK: `google-genai`.
 
 ### OpenAI

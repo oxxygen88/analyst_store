@@ -121,7 +121,7 @@ def test_gemini_sdk_missing_uses_http_fallback():
     with patch("src.ai_presentation._module_available", return_value=False):
         with patch("src.ai_presentation._call_gemini_http", return_value=raw) as http_call:
             result = generate_ai_insights(
-                "AIza-test", "gemini-2.5-flash", {"kpi": {"net_sales": 1}},
+                "AIza-test", "gemini-3.7-flash", {"kpi": {"net_sales": 1}},
                 audience="Management / Owner", language="Bahasa Indonesia", provider="gemini"
             )
     assert result["presentation_title"] == "Gemini Test"
@@ -204,3 +204,46 @@ def test_ai_analyst_openai_fallback_mock():
         )
     assert out == "Jawaban berdasarkan data"
     assert call.called
+
+
+def test_gemini_model_fallback_on_unavailable():
+    from unittest.mock import patch
+    from src.gemini_models import call_gemini_with_fallback, GeminiModelUnavailableError
+
+    with patch("src.gemini_models.module_available", return_value=True):
+        with patch("src.gemini_models._sdk_single") as sdk_call:
+            sdk_call.side_effect = [
+                GeminiModelUnavailableError("404 NOT_FOUND model gemini-3.7-flash unavailable"),
+                "fallback success",
+            ]
+            out = call_gemini_with_fallback(
+                "AIza-test", "gemini-3.7-flash", "hello", prefer_sdk=True
+            )
+    assert out == "fallback success"
+    assert sdk_call.call_count == 2
+    assert sdk_call.call_args_list[0].args[1] == "gemini-3.7-flash"
+    assert sdk_call.call_args_list[1].args[1] == "gemini-3.6-flash"
+
+
+def test_gemini_does_not_fallback_on_quota_error():
+    from unittest.mock import patch
+    from src.gemini_models import call_gemini_with_fallback
+
+    with patch("src.gemini_models.module_available", return_value=True):
+        with patch("src.gemini_models._sdk_single", side_effect=RuntimeError("429 quota exceeded")) as sdk_call:
+            try:
+                call_gemini_with_fallback(
+                    "AIza-test", "gemini-3.7-flash", "hello", prefer_sdk=True
+                )
+                assert False, "quota error should propagate"
+            except RuntimeError as exc:
+                assert "429" in str(exc)
+    assert sdk_call.call_count == 1
+
+
+def test_gemini_fallback_chain_never_escalates_lite():
+    from src.gemini_models import fallback_chain
+    assert fallback_chain("gemini-3.7-flash") == [
+        "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"
+    ]
+    assert fallback_chain("gemini-3.5-flash-lite") == ["gemini-3.5-flash-lite"]

@@ -1,3 +1,15 @@
+# V2.6 — Gemini 3.x Compatibility & Auto Fallback
+
+- Replaced deprecated/retired Gemini 2.5 selections with stable Gemini 3.x IDs.
+- Default model: `gemini-3.7-flash`.
+- Stable fallback chain: `gemini-3.7-flash → gemini-3.6-flash → gemini-3.5-flash → gemini-3.5-flash-lite`.
+- Auto-fallback triggers only for model unavailable/deprecated/404 NOT_FOUND errors.
+- Quota, API key/auth, malformed request, and network errors are not masked by fallback.
+- Removed deprecated Gemini 3.x sampling parameters (`temperature`, `top_p`, `top_k`).
+- Added stale Streamlit session-state migration from old 2.5 model IDs to the new default.
+- Updated both Ask Anything by AI and AI Presentation Generator.
+- Regression tests: 14/14 passed.
+
 # V2.5 — Explicit Filter Processing
 
 - Added **Proses Data Sesuai Filter** button in the sidebar.

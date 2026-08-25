@@ -28,6 +28,7 @@ from src.cache_store import save_bundle_parquet
 from src.insights import management_alerts
 from src.ai_presentation import ai_runtime_info, build_pptx, generate_ai_insights, presentation_context
 from src.ai_analyst import build_question_context, generate_analyst_answer, tables_to_excel
+from src.gemini_models import GEMINI_DEFAULT_MODEL, GEMINI_MODELS, GEMINI_MODEL_LABELS
 from src.io import load_raw_inputs
 from src.pipeline import AnalysisBundle, build_bundle
 from src.utils import file_fingerprint, pct, rupiah, style_dataframe
@@ -764,10 +765,14 @@ def render_ask_ai(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str, fi
         )
         provider = "gemini" if provider_label == "Google Gemini" else "openai"
         if provider == "gemini":
+            if st.session_state.get("ask_gemini_model") not in (None, *GEMINI_MODELS):
+                st.session_state["ask_gemini_model"] = GEMINI_DEFAULT_MODEL
             model = c1.selectbox(
                 "Model",
-                ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
-                index=0,
+                GEMINI_MODELS,
+                index=GEMINI_MODELS.index(GEMINI_DEFAULT_MODEL),
+                format_func=lambda x: GEMINI_MODEL_LABELS.get(x, x),
+                help="Default: Gemini 3.7 Flash. Auto-fallback hanya berjalan bila model tidak tersedia/deprecated.",
                 key="ask_gemini_model",
             )
             secret_key = _streamlit_secret("GEMINI_API_KEY")
@@ -812,6 +817,8 @@ def render_ask_ai(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str, fi
             key="ask_response_style",
         )
         c5.caption(f"As of Date\n\n**{pd.Timestamp(as_of):%d %b %Y}**")
+        if provider == "gemini":
+            st.caption("Auto-fallback Gemini: 3.7 Flash → 3.6 Flash → 3.5 Flash → 3.5 Flash-Lite. Fallback hanya dipakai jika model tidak tersedia, bukan untuk error API key/quota.")
 
         runtime = ai_runtime_info()
         if provider == "gemini":
@@ -962,6 +969,8 @@ def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location
         provider = "gemini" if provider_label == "Google Gemini" else "openai"
 
         if provider == "gemini":
+            if st.session_state.get("gemini_model") not in (None, *GEMINI_MODELS):
+                st.session_state["gemini_model"] = GEMINI_DEFAULT_MODEL
             st.info(
                 "Gunakan Gemini API key dari Google AI Studio / Gemini API. "
                 "Provider ini terpisah dari OpenAI sehingga dapat digunakan walaupun quota OpenAI sedang habis."
@@ -982,11 +991,13 @@ def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location
             c1, c2, c3 = st.columns(3)
             model = c1.selectbox(
                 "Model",
-                ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
-                index=0,
-                help="Gemini 2.5 Flash direkomendasikan sebagai default karena balance kualitas dan kecepatan.",
+                GEMINI_MODELS,
+                index=GEMINI_MODELS.index(GEMINI_DEFAULT_MODEL),
+                format_func=lambda x: GEMINI_MODEL_LABELS.get(x, x),
+                help="Default: Gemini 3.7 Flash. Auto-fallback aktif jika model tidak tersedia/deprecated.",
                 key="gemini_model",
             )
+            st.caption("Auto-fallback: 3.7 Flash → 3.6 Flash → 3.5 Flash → 3.5 Flash-Lite. Error quota/API key tetap ditampilkan apa adanya.")
         else:
             st.info(
                 "Gunakan OpenAI API key dari platform.openai.com. "

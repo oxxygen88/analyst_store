@@ -22,7 +22,8 @@ from .analytics import (
     revenue_inventory_matrix,
     target_status,
 )
-from .ai_presentation import _module_available, _responses_output_text
+from .ai_presentation import _responses_output_text
+from .gemini_models import call_gemini_with_fallback
 
 
 MONTH_ALIASES = {
@@ -561,68 +562,11 @@ def _call_openai_text(api_key: str, model: str, prompt: str) -> str:
         raise RuntimeError(f"OpenAI API request gagal: {exc}") from exc
 
 
-def _gemini_text_from_payload(payload: Dict[str, Any]) -> str:
-    chunks = []
-    for candidate in payload.get("candidates", []) or []:
-        content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
-        for part in content.get("parts", []) or []:
-            if isinstance(part, dict) and part.get("text"):
-                chunks.append(str(part["text"]))
-    text = "\n".join(chunks).strip()
-    if not text:
-        raise RuntimeError("Gemini mengembalikan respons kosong.")
-    return text
-
-
 def _call_gemini_text(api_key: str, model: str, prompt: str) -> str:
-    if _module_available("google.genai"):
-        try:
-            from google import genai
-            from google.genai import types
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2),
-            )
-            text = (getattr(response, "text", None) or "").strip()
-            if not text:
-                raise RuntimeError("Gemini mengembalikan respons kosong.")
-            return text
-        except Exception as exc:
-            raise RuntimeError(f"Gemini API request gagal: {exc}") from exc
-
-    safe_model = urllib.parse.quote(model, safe="-._")
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{safe_model}:generateContent"
-    body = json.dumps(
-        {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2}},
-        ensure_ascii=False,
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-        method="POST",
+    """Gemini analyst call with stable-model auto fallback."""
+    return call_gemini_with_fallback(
+        api_key, model, prompt, json_mode=False, prefer_sdk=True
     )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        try:
-            parsed = json.loads(raw)
-            message = parsed.get("error", {}).get("message") or raw
-        except Exception:
-            message = raw
-        if exc.code in (400, 401, 403):
-            raise RuntimeError(f"Gemini API key/request ditolak ({exc.code}): {message}") from exc
-        if exc.code == 429:
-            raise RuntimeError(f"Gemini quota/limit tercapai (429): {message}") from exc
-        raise RuntimeError(f"Gemini API error HTTP {exc.code}: {message}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Tidak dapat terhubung ke Gemini API: {exc.reason}") from exc
-    return _gemini_text_from_payload(payload)
-
 
 def generate_analyst_answer(
     api_key: str,

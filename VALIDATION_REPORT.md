@@ -60,3 +60,13 @@ Angka aktual di PC pengguna dapat berbeda berdasarkan CPU, RAM, versi Python, da
 - PPTX builder validated against the IDK-ATP dataset using mock AI insight content.
 - Generated deck: 8 slides, PowerPoint file opens/renders successfully.
 - Core automated tests after V2 update: **5/5 passed**.
+
+
+## V2.6 Gemini Compatibility Validation
+
+- Gemini default model updated to `gemini-3.7-flash`.
+- Auto-fallback model-unavailable path tested: 3.7 → 3.6.
+- Quota errors verified to stop immediately without fallback masking.
+- Flash-Lite selection verified not to escalate to higher-cost models.
+- Gemini 3.x requests no longer send deprecated sampling parameters.
+- Full regression suite: **14/14 passed**.
