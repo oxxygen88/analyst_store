@@ -4,6 +4,8 @@ import re
 import numpy as np
 import pandas as pd
 
+from .config import SUB_KEL_FALLBACK
+
 
 def extract_partner(text: str) -> str:
     text = str(text or "").strip()
@@ -80,10 +82,25 @@ def enrich_transactions(tx: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_master(opening: pd.DataFrame, tx: pd.DataFrame) -> pd.DataFrame:
+    """Build one product master while preserving metadata from either source.
+
+    If one source has no sub_kel, the loader supplies a placeholder. We treat that
+    placeholder as missing during the merge so a real sub_kel from the other source
+    is never overwritten.
+    """
     cols = ["sku", "nama_barang", "supplier", "subdept", "kel_barang", "sub_kel"]
-    opening_master = opening[cols].copy()
-    tx_master = tx.sort_values("tgl").drop_duplicates("sku", keep="last")[cols].copy()
-    return pd.concat([opening_master, tx_master], ignore_index=True).drop_duplicates("sku", keep="last")
+    opening_master = opening[cols].drop_duplicates("sku", keep="last").set_index("sku")
+    tx_master = tx.sort_values("tgl", na_position="first").drop_duplicates("sku", keep="last")[cols].set_index("sku")
+
+    for frame in (opening_master, tx_master):
+        for c in ["nama_barang", "supplier", "subdept", "kel_barang", "sub_kel"]:
+            frame[c] = frame[c].replace({"": pd.NA, SUB_KEL_FALLBACK: pd.NA})
+
+    master = tx_master.combine_first(opening_master).reset_index()
+    for c in ["nama_barang", "supplier", "subdept", "kel_barang"]:
+        master[c] = master[c].fillna("")
+    master["sub_kel"] = master["sub_kel"].fillna(SUB_KEL_FALLBACK)
+    return master
 
 
 def aggregate_opening(opening: pd.DataFrame) -> pd.DataFrame:

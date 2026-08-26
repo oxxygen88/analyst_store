@@ -247,3 +247,33 @@ def test_gemini_fallback_chain_never_escalates_lite():
         "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"
     ]
     assert fallback_chain("gemini-3.5-flash-lite") == ["gemini-3.5-flash-lite"]
+
+
+def test_optional_sub_kel_and_transaction_date_fallback():
+    from src.io import load_opening_bytes, load_transactions_bytes
+    opening_csv = b"sku,nama_barang,supplier,subdept,kel_barang,saldo_awal,hrg_beli,subtotal\nA,Alpha,S1,D1,K1,10,50,500\n"
+    tx_csv = b"kd_trx,tgl,sku,nama_barang,supplier,subdept,kel_barang,stock_in,stock_out,harga,subtotal,keterangan\nTHJ2601010001C,16:44.0,A,Alpha,S1,D1,K1,0,1,100,100,Penjualan\n"
+    op = load_opening_bytes(opening_csv)
+    tx = load_transactions_bytes(tx_csv, analysis_year=2026)
+    assert "sub_kel" in op.columns and op.loc[0, "sub_kel"] == "(Tidak tersedia)"
+    assert "sub_kel" in tx.columns and tx.loc[0, "sub_kel"] == "(Tidak tersedia)"
+    assert tx.loc[0, "tgl"] == pd.Timestamp("2026-01-01")
+    assert tx.loc[0, "date_parse_status"] == "KD_TRX_DATE"
+    assert bool(tx.loc[0, "time_available"]) is False
+
+
+def test_full_datetime_keeps_hour():
+    from src.io import load_transactions_bytes
+    tx_csv = b"kd_trx,tgl,sku,nama_barang,supplier,subdept,kel_barang,stock_in,stock_out,harga,subtotal,keterangan\nJA-2601010001-H,2026-01-01 08:39:08,A,Alpha,S1,D1,K1,0,1,100,100,Penjualan\n"
+    tx = load_transactions_bytes(tx_csv, analysis_year=2026)
+    assert tx.loc[0, "tgl"] == pd.Timestamp("2026-01-01 08:39:08")
+    assert tx.loc[0, "date_parse_status"] == "TGL"
+    assert bool(tx.loc[0, "time_available"]) is True
+
+
+def test_outside_year_reference_is_flagged_not_double_counted():
+    from src.io import load_transactions_bytes
+    tx_csv = b"kd_trx,tgl,sku,nama_barang,supplier,subdept,kel_barang,stock_in,stock_out,harga,subtotal,keterangan\nBL-2410290028-HJ,00:00.0,A,Alpha,S1,D1,K1,1,0,50,50,Pembelian\n"
+    tx = load_transactions_bytes(tx_csv, analysis_year=2026)
+    assert pd.isna(tx.loc[0, "tgl"])
+    assert tx.loc[0, "date_parse_status"] == "OUTSIDE_ANALYSIS_YEAR"

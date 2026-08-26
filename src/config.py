@@ -1,14 +1,19 @@
 APP_TITLE = "INDOKIDS Branch Performance Command Center"
 APP_SUBTITLE = "Monitor · Diagnose · Act"
 
+# sub_kel is intentionally OPTIONAL. Some branches only have hierarchy up to kel_barang.
+# The loader will create a safe placeholder so every downstream analytics module can
+# keep using a consistent schema without inventing a real sub-category.
+SUB_KEL_FALLBACK = "(Tidak tersedia)"
+
 REQUIRED_OPENING_COLUMNS = {
-    "sku", "nama_barang", "supplier", "subdept", "kel_barang", "sub_kel",
+    "sku", "nama_barang", "supplier", "subdept", "kel_barang",
     "saldo_awal", "hrg_beli", "subtotal",
 }
 
 REQUIRED_TRANSACTION_COLUMNS = {
     "kd_trx", "tgl", "sku", "nama_barang", "supplier", "subdept", "kel_barang",
-    "sub_kel", "stock_in", "stock_out", "harga", "subtotal", "keterangan",
+    "stock_in", "stock_out", "harga", "subtotal", "keterangan",
 }
 
 REQUIRED_PURCHASE_COLUMNS = {"tgl", "no_faktur_beli", "sku", "harga_beli"}

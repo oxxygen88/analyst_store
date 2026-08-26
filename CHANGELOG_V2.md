@@ -93,3 +93,16 @@
 ## Validation
 - Existing + V2 unit tests: 5/5 passed.
 - PPTX builder tested using full IDK-ATP dataset and visually rendered successfully.
+
+## V2.7 — Flexible Branch Schema
+
+- `sub_kel` sekarang **opsional** pada Stock Awal dan Kartu Stok.
+- Jika source tidak memiliki `sub_kel`, engine menambahkan placeholder internal `(Tidak tersedia)` tanpa mengarang klasifikasi baru.
+- Filter **Sub Kel** otomatis disembunyikan jika cabang memang tidak menyediakan level tersebut.
+- Category & Supplier hanya menawarkan dimensi `sub_kel` bila data nyata tersedia.
+- SKU 360 tidak menampilkan hierarchy `sub_kel` palsu.
+- Menambahkan parser tanggal adaptif untuk export POS yang hanya mempunyai `tgl` berbentuk `MM:SS.0`.
+- Untuk format tersebut, tanggal kalender direkonstruksi dari `kd_trx` (YYMMDD) dan `time_available=False`.
+- Hourly Sales otomatis dinonaktifkan jika jam transaksi tidak dapat dipercaya.
+- Reference transaksi di luar tahun analisis ditandai `OUTSIDE_ANALYSIS_YEAR`, tidak dihitung sebagai movement tahun berjalan, dan muncul di Data & Anomaly Center.
+- Smoke test NRM-HJL 2026 berhasil: 877.720 baris transaksi, 61.213 SKU master, coverage 1 Jan–25 Agu 2026.

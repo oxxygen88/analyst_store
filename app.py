@@ -25,6 +25,7 @@ from src.analytics import (
     target_status,
 )
 from src.cache_store import save_bundle_parquet
+from src.config import SUB_KEL_FALLBACK
 from src.insights import management_alerts
 from src.ai_presentation import ai_runtime_info, build_pptx, generate_ai_insights, presentation_context
 from src.ai_analyst import build_question_context, generate_analyst_answer, tables_to_excel
@@ -266,11 +267,20 @@ def sidebar_navigation(bundle: AnalysisBundle):
             sorted(str(x) for x in bundle.master["kel_barang"].dropna().unique() if str(x).strip()),
             key="f_kel",
         )
-        subkel = st.multiselect(
-            "Sub Kel",
-            sorted(str(x) for x in bundle.master["sub_kel"].dropna().unique() if str(x).strip()),
-            key="f_subkel",
+        subkel_options = sorted(
+            str(x) for x in bundle.master["sub_kel"].dropna().unique()
+            if str(x).strip() and str(x).strip() != SUB_KEL_FALLBACK
         )
+        if subkel_options:
+            subkel = st.multiselect(
+                "Sub Kel",
+                subkel_options,
+                key="f_subkel",
+            )
+        else:
+            st.session_state["f_subkel"] = []
+            subkel = []
+            st.caption("Sub Kel tidak tersedia pada file cabang ini. Filter tetap bekerja sampai level Kel Barang.")
 
         draft_filters = _clean_filter_dict({
             "supplier": suppliers,
@@ -589,11 +599,18 @@ def render_sales(bundle: AnalysisBundle, as_of: pd.Timestamp, filters: dict):
         st.plotly_chart(fig, use_container_width=True)
     with right:
         section_title("Hourly Sales")
-        hr = p.groupby("hour", as_index=False)["net_sales_value"].sum()
-        fig = px.bar(hr, x="hour", y="net_sales_value")
-        fig.update_layout(height=340, xaxis_title="Hour", yaxis_title="Net Sales", margin=dict(l=10,r=10,t=10,b=10))
-        currency_axis(fig, "y")
-        st.plotly_chart(fig, use_container_width=True)
+        if "time_available" in p.columns and not p["time_available"].fillna(False).any():
+            st.info(
+                "Jam transaksi tidak tersedia pada format file ini. Tanggal transaksi berhasil direkonstruksi dari kode transaksi, "
+                "tetapi aplikasi sengaja tidak mengarang jam agar analisis hourly tetap akurat."
+            )
+        else:
+            hourly_source = p[p["time_available"].fillna(True)] if "time_available" in p.columns else p
+            hr = hourly_source.groupby("hour", as_index=False)["net_sales_value"].sum()
+            fig = px.bar(hr, x="hour", y="net_sales_value")
+            fig.update_layout(height=340, xaxis_title="Hour", yaxis_title="Net Sales", margin=dict(l=10,r=10,t=10,b=10))
+            currency_axis(fig, "y")
+            st.plotly_chart(fig, use_container_width=True)
 
 
 def render_inventory(bundle: AnalysisBundle, as_of: pd.Timestamp, filters: dict):
@@ -667,7 +684,10 @@ def render_category_supplier(bundle: AnalysisBundle, as_of: pd.Timestamp, filter
     start = as_of.to_period("M").to_timestamp()
     inv = apply_product_filters(cached_inventory(bundle.opening, bundle.tx, bundle.purchases, as_of), filters)
     tx_scope = apply_product_filters(bundle.tx, filters)
-    dim = st.selectbox("Dimension", ["supplier","subdept","kel_barang","sub_kel"])
+    dimensions = ["supplier", "subdept", "kel_barang"]
+    if bundle.master["sub_kel"].astype(str).ne(SUB_KEL_FALLBACK).any():
+        dimensions.append("sub_kel")
+    dim = st.selectbox("Dimension", dimensions)
     matrix = revenue_inventory_matrix(tx_scope, inv, start, as_of, dim)
     matrix["interpretation"] = np.select(
         [matrix["productivity_index"].ge(1.5), matrix["productivity_index"].le(.65)],
@@ -715,7 +735,10 @@ def render_sku360(bundle: AnalysisBundle, as_of: pd.Timestamp, filters: dict):
         st.warning("SKU tidak ditemukan pada snapshot.")
         return
     m = meta.iloc[0]
-    st.markdown(f"### {m['nama_barang']}  \n`{sku}` · {m['supplier']} · {m['subdept']} / {m['kel_barang']} / {m['sub_kel']}")
+    hierarchy = f"{m['subdept']} / {m['kel_barang']}"
+    if str(m.get("sub_kel", "")).strip() not in {"", SUB_KEL_FALLBACK}:
+        hierarchy += f" / {m['sub_kel']}"
+    st.markdown(f"### {m['nama_barang']}  \n`{sku}` · {m['supplier']} · {hierarchy}")
     txs = bundle.tx[(bundle.tx["sku"].eq(sku)) & bundle.tx["date"].le(as_of)].copy()
     k = commercial_kpis(txs)
     c = st.columns(5)
@@ -1131,12 +1154,20 @@ def render_data_anomaly(bundle: AnalysisBundle, as_of: pd.Timestamp):
     st.title("Data & Anomaly Center")
     st.caption("Pisahkan masalah data dari masalah bisnis agar rekomendasi tidak dibangun di atas data yang keliru.")
     inv = cached_inventory(bundle.opening, bundle.tx, bundle.purchases, as_of)
-    issues = anomaly_tables(bundle.opening, bundle.tx[bundle.tx["date"].le(as_of)], inv)
+    tx_for_anomaly = bundle.tx[bundle.tx["date"].le(as_of) | bundle.tx["date"].isna()]
+    issues = anomaly_tables(bundle.opening, tx_for_anomaly, inv)
     c = st.columns(4)
     c[0].metric("Opening SKU", f"{bundle.opening['sku'].nunique():,}".replace(",", "."))
     c[1].metric("Transaction Rows", f"{len(bundle.tx):,}".replace(",", "."))
     c[2].metric("Active Transaction SKU", f"{bundle.tx['sku'].nunique():,}".replace(",", "."))
     c[3].metric("Data Coverage", f"{bundle.min_date:%d %b} – {bundle.max_date:%d %b %Y}")
+
+    subkel_real = bundle.master["sub_kel"].astype(str).ne(SUB_KEL_FALLBACK).any()
+    reconstructed = int(bundle.tx.get("date_parse_status", pd.Series(dtype=str)).eq("KD_TRX_DATE").sum()) if "date_parse_status" in bundle.tx.columns else 0
+    if not subkel_real:
+        st.info("Format cabang ini tidak memiliki kolom **sub_kel**. Aplikasi menggunakan schema adapter dan analisis tetap berjalan sampai level **kel_barang**.")
+    if reconstructed:
+        st.info(f"Tanggal pada **{reconstructed:,} baris** direkonstruksi dari `kd_trx` karena kolom `tgl` tidak memuat tanggal kalender. Analisis per jam dinonaktifkan untuk baris tersebut.".replace(",", "."))
 
     summary = pd.DataFrame({"issue": list(issues.keys()), "rows": [len(v) for v in issues.values()]})
     section_title("Anomaly Summary")

@@ -16,6 +16,7 @@ from .config import (
     PARETO_REVENUE_SHARE,
 )
 from .hpp import latest_cost_asof
+from .transform import build_master
 from .utils import safe_div
 
 
@@ -131,14 +132,12 @@ def current_stock_snapshot(opening: pd.DataFrame, tx: pd.DataFrame, as_of_date: 
         opening_qty=("saldo_awal", "sum"),
         opening_value=("subtotal", "sum"),
     )
-    open_meta = opening.drop_duplicates("sku", keep="last")[["sku"] + meta_cols]
     tx_upto = tx[tx["date"].le(as_of)]
     movement = tx_upto.groupby("sku", as_index=False).agg(
         stock_in=("stock_in", "sum"),
         stock_out=("stock_out", "sum"),
     )
-    tx_meta = tx_upto.sort_values("tgl").drop_duplicates("sku", keep="last")[["sku"] + meta_cols]
-    master = pd.concat([open_meta, tx_meta], ignore_index=True).drop_duplicates("sku", keep="last")
+    master = build_master(opening, tx_upto)
     snap = master.merge(opening_agg, on="sku", how="left").merge(movement, on="sku", how="left")
     for c in ["opening_qty", "opening_value", "stock_in", "stock_out"]:
         snap[c] = snap[c].fillna(0.0)
@@ -389,6 +388,10 @@ def anomaly_tables(opening: pd.DataFrame, tx: pd.DataFrame, inventory: pd.DataFr
     issues["subtotal_mismatch"] = tx[(qty.gt(0)) & (~np.isclose(tx["subtotal"], expected, rtol=1e-6, atol=1.0))].copy()
     issues["both_in_out"] = tx[tx["stock_in"].gt(0) & tx["stock_out"].gt(0)].copy()
     issues["unknown_movement"] = tx[tx["movement"].isin(["OTHER_IN","OTHER_OUT","OTHER_MATCH"])].copy()
+    if "date_parse_status" in tx.columns:
+        issues["date_unresolved"] = tx[tx["date_parse_status"].isin(["UNRESOLVED", "OUTSIDE_ANALYSIS_YEAR"])].copy()
+    else:
+        issues["date_unresolved"] = tx[tx["tgl"].isna()].copy()
     dup_cols = [c for c in ["kd_trx","tgl","sku","stock_in","stock_out","harga","subtotal","keterangan"] if c in tx.columns]
     issues["suspicious_duplicates"] = tx[tx.duplicated(dup_cols, keep=False)].copy()
     if "hpp_source" in tx.columns:
