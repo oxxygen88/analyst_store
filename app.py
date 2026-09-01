@@ -27,19 +27,54 @@ from src.analytics import (
 from src.cache_store import save_bundle_parquet
 from src.config import SUB_KEL_FALLBACK
 from src.insights import management_alerts
-from src.ai_presentation import (
-    ai_runtime_info,
-    advanced_presentation_context,
-    build_dynamic_pptx,
-    build_recommended_slide_plan,
-    generate_ai_slide_plan,
-    generate_dynamic_presentation_content,
-    normalize_slide_plan,
-    PRESENTATION_FOCUS_OPTIONS,
-    PRESENTATION_DEPTHS,
-    SLIDE_LIBRARY,
-    recommended_focus_for_audience,
+# AI Presentation is loaded through a compatibility layer so a partial GitHub
+# update cannot crash the entire Streamlit application.
+from src import ai_presentation as _ai_presentation
+
+ai_runtime_info = _ai_presentation.ai_runtime_info
+
+_AI_PRESENTATION_V28_REQUIRED = (
+    "advanced_presentation_context",
+    "build_dynamic_pptx",
+    "build_recommended_slide_plan",
+    "generate_ai_slide_plan",
+    "generate_dynamic_presentation_content",
+    "normalize_slide_plan",
+    "PRESENTATION_FOCUS_OPTIONS",
+    "PRESENTATION_DEPTHS",
+    "SLIDE_LIBRARY",
+    "recommended_focus_for_audience",
 )
+AI_PRESENTATION_V28_MISSING = [
+    name for name in _AI_PRESENTATION_V28_REQUIRED
+    if not hasattr(_ai_presentation, name)
+]
+AI_PRESENTATION_V28_READY = not AI_PRESENTATION_V28_MISSING
+
+if AI_PRESENTATION_V28_READY:
+    advanced_presentation_context = _ai_presentation.advanced_presentation_context
+    build_dynamic_pptx = _ai_presentation.build_dynamic_pptx
+    build_recommended_slide_plan = _ai_presentation.build_recommended_slide_plan
+    generate_ai_slide_plan = _ai_presentation.generate_ai_slide_plan
+    generate_dynamic_presentation_content = _ai_presentation.generate_dynamic_presentation_content
+    normalize_slide_plan = _ai_presentation.normalize_slide_plan
+    PRESENTATION_FOCUS_OPTIONS = _ai_presentation.PRESENTATION_FOCUS_OPTIONS
+    PRESENTATION_DEPTHS = _ai_presentation.PRESENTATION_DEPTHS
+    SLIDE_LIBRARY = _ai_presentation.SLIDE_LIBRARY
+    recommended_focus_for_audience = _ai_presentation.recommended_focus_for_audience
+else:
+    # Safe placeholders are defined only so the module can import cleanly.
+    # render_ai_presentation() exits before using them and shows a repair message.
+    advanced_presentation_context = None
+    build_dynamic_pptx = None
+    build_recommended_slide_plan = None
+    generate_ai_slide_plan = None
+    generate_dynamic_presentation_content = None
+    normalize_slide_plan = None
+    PRESENTATION_FOCUS_OPTIONS = []
+    PRESENTATION_DEPTHS = {"Standard": 14}
+    SLIDE_LIBRARY = {}
+    recommended_focus_for_audience = lambda audience: []
 from src.ai_analyst import build_question_context, generate_analyst_answer, tables_to_excel
 from src.gemini_models import GEMINI_DEFAULT_MODEL, GEMINI_MODELS, GEMINI_MODEL_LABELS
 from src.io import load_raw_inputs
@@ -989,6 +1024,22 @@ def render_ask_ai(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str, fi
 
 def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str):
     st.title("AI Presentation Studio")
+
+    if not AI_PRESENTATION_V28_READY:
+        st.error(
+            "Module AI Presentation belum sinkron dengan app.py V2.8. "
+            "Aplikasi utama tetap dapat digunakan, tetapi AI Presentation Studio dinonaktifkan sementara."
+        )
+        st.warning(
+            "Replace **dua file sekaligus** dari hotfix V2.8.1: `app.py` dan `src/ai_presentation.py`, "
+            "lalu commit/push ke GitHub dan reboot Streamlit."
+        )
+        st.code(
+            "Missing V2.8 symbols:\n- " + "\n- ".join(AI_PRESENTATION_V28_MISSING),
+            language="text",
+        )
+        return
+
     st.caption(
         "Bangun presentasi management yang dinamis: tentukan objective, fokus, kedalaman, dan poin wajib; "
         "AI menyusun slide plan dan insight, sedangkan angka/chart/table tetap berasal dari engine aplikasi."
