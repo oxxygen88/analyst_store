@@ -277,3 +277,64 @@ def test_outside_year_reference_is_flagged_not_double_counted():
     tx = load_transactions_bytes(tx_csv, analysis_year=2026)
     assert pd.isna(tx.loc[0, "tgl"])
     assert tx.loc[0, "date_parse_status"] == "OUTSIDE_ANALYSIS_YEAR"
+
+
+def test_v28_recommended_slide_plan_depth_and_mandatory():
+    from src.ai_presentation import build_recommended_slide_plan
+    plan = build_recommended_slide_plan(
+        ["Executive Performance", "Target & Forecast", "Sales Growth", "Pareto Product", "Product Opportunity", "Supplier Performance", "30-Day Action Plan"],
+        "Executive — 7–9 slides",
+        "Management / Owner",
+    )
+    assert len(plan) <= 9
+    types = [x["slide_type"] for x in plan]
+    assert types[0] == "cover"
+    assert "executive" in types
+    assert "action_plan" in types
+    assert types[-1] == "closing"
+
+
+def test_v28_normalize_slide_plan_filters_invalid_and_order():
+    from src.ai_presentation import normalize_slide_plan
+    raw = [
+        {"include": True, "order": 3, "slide_type": "target", "title": "T", "objective": "O"},
+        {"include": False, "order": 1, "slide_type": "supplier", "title": "S"},
+        {"include": True, "order": 2, "slide_type": "not_valid", "title": "Bad"},
+        {"include": True, "order": 1, "slide_type": "cover", "title": "Cover"},
+    ]
+    out = normalize_slide_plan(raw)
+    assert [x["slide_type"] for x in out] == ["cover", "target"]
+    assert [x["order"] for x in out] == [1, 2]
+
+
+def test_v28_dynamic_pptx_builder_mock():
+    from src.ai_presentation import build_dynamic_pptx, build_recommended_slide_plan
+    context = {
+        "kpi": {"net_sales": 1000000.0, "trx_count": 10, "atv": 100000.0, "upt": 2.0, "gross_profit": 250000.0, "gross_margin": .25},
+        "target": {"target": 1500000.0, "actual":1000000.0, "achievement": 2/3, "gap":500000.0, "projected_month_end":1300000.0, "projected_gap": 200000.0, "required_daily_sales": 50000.0},
+        "pareto": {"core_share": .60, "opportunity_share": .20, "a80_sku": 20},
+        "monthly": [{"month":"2026-01-01","net_sales":1000000.0,"target_omzet":1500000.0}],
+        "top_focus_products": [{"sku":"A","nama_barang":"Alpha","pareto_group":"OPPORTUNITY","revenue":500000.0,"growth_30d":.2,"current_stock":5,"inventory_status":"NORMAL","recommended_action":"Push sales"}],
+        "stockout_recovery": [],
+        "inventory_summary": [{"inventory_status":"NORMAL","sku_count":100,"stock_qty":500,"stock_value":2000000.0}],
+        "inventory_capital": [{"inventory_status":"NORMAL","sku_count":100,"stock_qty":500,"stock_value":2000000.0}],
+        "commercial_comparison": {"metrics": {"net_sales":{"delta":.1},"trx_count":{"delta":.05},"atv":{"delta":.03},"upt":{"delta":.02}}},
+        "profit_products": [{"sku":"A","nama_barang":"Alpha","revenue":500000.0,"gross_profit":150000.0,"gross_margin":.3}],
+        "top_suppliers": [{"supplier":"S1","revenue":700000.0,"inventory_value":800000.0,"revenue_share":.7,"inventory_share":.4,"productivity_index":1.75}],
+        "top_categories": [{"subdept":"D1","revenue":700000.0,"inventory_value":800000.0,"revenue_share":.7,"inventory_share":.4,"productivity_index":1.75}],
+        "purchase_by_supplier": [], "transfer_by_supplier": [], "anomalies": {},
+        "pareto_migration": {"top_changes": []},
+    }
+    plan = build_recommended_slide_plan(
+        ["Executive Performance","Target & Forecast","Pareto Product","Product Opportunity","Inventory Health","30-Day Action Plan"],
+        "Executive — 7–9 slides", "Management / Owner"
+    )
+    ai = {
+        "presentation_title":"Dynamic Test",
+        "slides":[{"slide_type":x["slide_type"],"title":x["title"],"headline":"Headline","bullets":["Point 1","Point 2"]} for x in plan],
+        "recommended_actions":[{"priority":1,"action":"Push Alpha","why":"Potential","expected_impact":"Growth","owner":"Buyer","timing":"7 days"}],
+        "closing_message":"Close",
+    }
+    payload = build_dynamic_pptx(context, ai, plan, branch="IDK-ATP", as_of=pd.Timestamp("2026-08-22"), audience="Management / Owner")
+    assert payload[:2] == b"PK"
+    assert len(payload) > 10000

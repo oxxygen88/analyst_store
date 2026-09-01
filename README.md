@@ -253,3 +253,7 @@ indokids_branch_command_center/
 ## Filter Produk V2.5
 
 Filter produk menggunakan mekanisme **draft → apply**. Pilih Supplier/Subdept/Kel Barang/Sub Kel di sidebar, lalu klik **Proses Data Sesuai Filter**. Halaman detail baru menggunakan filter setelah tombol tersebut diklik. Gunakan **Reset Filter** untuk kembali ke seluruh data. Jika filter aktif, menu Ask Anything by AI otomatis menggunakan scope **Ikuti Filter Produk Sidebar**.
+
+
+## V2.8 — Advanced AI Presentation Studio
+See `README_V2_8.md` for the complete workflow. AI Presentation now supports Presentation Brief, audience-specific focus, dynamic slide planning, editable slide plan, Executive/Standard/Deep Dive depth, and dynamic 7–20 slide PPTX generation.

@@ -66,3 +66,7 @@ GEMINI_API_KEY = "AIza..."
 Menu **Ask Anything by AI** dan **AI Presentation** akan otomatis memakai secret tersebut. Jika secret tidak tersedia, aplikasi tetap menampilkan field password manual. Jangan commit key asli ke GitHub.
 
 Ask Anything by AI tidak mengirim raw transaction penuh ke provider. Aplikasi membangun fact pack dari kalkulasi lokal dan hanya mengirim tabel agregat yang relevan dengan pertanyaan.
+
+
+## V2.8 update
+No dependency change. Replace `app.py` and `src/ai_presentation.py`, then commit/push. Existing Streamlit Secrets `GEMINI_API_KEY` / `OPENAI_API_KEY` continue to work.

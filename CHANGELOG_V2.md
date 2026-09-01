@@ -1,3 +1,37 @@
+# V2.8 — Advanced AI Presentation Studio
+
+## New presentation workflow
+- Presentation Brief: objective, focus areas, depth, and mandatory user discussion points.
+- Audience-aware default focus for Management/Owner, Buyer & Inventory, and Store Operations.
+- AI Slide Plan generation before final deck generation.
+- Editable slide plan using Streamlit data editor: include/exclude, order, slide type, title, objective, emphasis, and dynamic rows.
+- Recommended local slide plan fallback without using an extra AI call.
+- Dynamic deck depth: Executive 7–9, Standard 10–14, Deep Dive 15–20 slides.
+- Dynamic slide library: Executive, Target, Sales Growth, Gap Diagnosis, Pareto, Pareto Migration, Product Opportunity, Stockout Recovery, Inventory Health, Inventory Capital, Profitability, Supplier, Category, Transfer, Purchase, Anomaly, 30-Day Action Plan, Closing.
+
+## Analytics fact-pack enhancements
+- Current MTD vs previous-month comparable-period commercial comparison.
+- Daily sales fact-pack.
+- Inventory capital by status.
+- Stockout/revenue recovery candidate list.
+- Pareto migration and product momentum.
+- Purchase by supplier and transfer flow summaries.
+- Profitability leaders.
+
+## AI governance
+- AI cannot invent numeric facts or unsupported causal explanations.
+- User brief is mandatory only when supported by application data.
+- Facts, data-supported interpretation, hypothesis, and recommendation are explicitly separated in the prompt.
+- Raw transaction rows are not sent directly to the AI provider.
+- Charts, tables, KPI cards, and monetary values are generated locally from the analytics engine.
+
+## Validation
+- 20/20 automated tests passed.
+- Smoke-tested against the real IDK-ATP dataset through 22 Aug 2026.
+- Deep Dive generated 19 slides successfully.
+
+---
+
 # V2.6 — Gemini 3.x Compatibility & Auto Fallback
 
 - Replaced deprecated/retired Gemini 2.5 selections with stable Gemini 3.x IDs.

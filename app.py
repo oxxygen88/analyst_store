@@ -27,7 +27,19 @@ from src.analytics import (
 from src.cache_store import save_bundle_parquet
 from src.config import SUB_KEL_FALLBACK
 from src.insights import management_alerts
-from src.ai_presentation import ai_runtime_info, build_pptx, generate_ai_insights, presentation_context
+from src.ai_presentation import (
+    ai_runtime_info,
+    advanced_presentation_context,
+    build_dynamic_pptx,
+    build_recommended_slide_plan,
+    generate_ai_slide_plan,
+    generate_dynamic_presentation_content,
+    normalize_slide_plan,
+    PRESENTATION_FOCUS_OPTIONS,
+    PRESENTATION_DEPTHS,
+    SLIDE_LIBRARY,
+    recommended_focus_for_audience,
+)
 from src.ai_analyst import build_question_context, generate_analyst_answer, tables_to_excel
 from src.gemini_models import GEMINI_DEFAULT_MODEL, GEMINI_MODELS, GEMINI_MODEL_LABELS
 from src.io import load_raw_inputs
@@ -976,179 +988,275 @@ def render_ask_ai(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str, fi
             )
 
 def render_ai_presentation(bundle: AnalysisBundle, as_of: pd.Timestamp, location: str):
-    st.title("AI Presentation Generator")
+    st.title("AI Presentation Studio")
     st.caption(
-        "Generate deck PowerPoint berbasis data cabang + insight AI. "
-        "Angka utama selalu berasal dari engine aplikasi; AI fokus pada narasi dan rekomendasi."
+        "Bangun presentasi management yang dinamis: tentukan objective, fokus, kedalaman, dan poin wajib; "
+        "AI menyusun slide plan dan insight, sedangkan angka/chart/table tetap berasal dari engine aplikasi."
     )
 
-    with st.expander("AI Provider Settings", expanded=True):
+    with st.expander("1. AI Provider & Audience", expanded=True):
         provider_label = st.selectbox(
             "AI Provider",
             ["Google Gemini", "OpenAI"],
             index=0,
-            help="Pilih provider AI yang akan menyusun insight. PowerPoint tetap dibangun lokal oleh aplikasi.",
+            help="Provider hanya menyusun struktur dan narasi. Angka PowerPoint selalu berasal dari analytics engine lokal.",
         )
         provider = "gemini" if provider_label == "Google Gemini" else "openai"
 
         if provider == "gemini":
             if st.session_state.get("gemini_model") not in (None, *GEMINI_MODELS):
                 st.session_state["gemini_model"] = GEMINI_DEFAULT_MODEL
-            st.info(
-                "Gunakan Gemini API key dari Google AI Studio / Gemini API. "
-                "Provider ini terpisah dari OpenAI sehingga dapat digunakan walaupun quota OpenAI sedang habis."
-            )
             secret_key = _streamlit_secret("GEMINI_API_KEY")
             if secret_key:
                 api_key = secret_key
                 st.success("Gemini API Key dimuat dari Streamlit Secrets.")
             else:
                 api_key = st.text_input(
-                    "Gemini API Key",
-                    type="password",
-                    value="",
-                    placeholder="AIza...",
-                    help="Key hanya dipakai saat tombol Generate ditekan dan tidak ditulis ke cache/file aplikasi.",
-                    key="gemini_api_key",
+                    "Gemini API Key", type="password", value="", placeholder="AIza...",
+                    help="Key hanya dipakai untuk request AI dan tidak disimpan ke dataset/cache.", key="presentation_gemini_api_key",
                 )
             c1, c2, c3 = st.columns(3)
             model = c1.selectbox(
-                "Model",
-                GEMINI_MODELS,
+                "Model", GEMINI_MODELS,
                 index=GEMINI_MODELS.index(GEMINI_DEFAULT_MODEL),
                 format_func=lambda x: GEMINI_MODEL_LABELS.get(x, x),
-                help="Default: Gemini 3.7 Flash. Auto-fallback aktif jika model tidak tersedia/deprecated.",
-                key="gemini_model",
+                key="presentation_gemini_model",
             )
-            st.caption("Auto-fallback: 3.7 Flash → 3.6 Flash → 3.5 Flash → 3.5 Flash-Lite. Error quota/API key tetap ditampilkan apa adanya.")
         else:
-            st.info(
-                "Gunakan OpenAI API key dari platform.openai.com. "
-                "ChatGPT Plus/Pro dan OpenAI API memiliki billing yang terpisah."
-            )
             secret_key = _streamlit_secret("OPENAI_API_KEY")
             if secret_key:
                 api_key = secret_key
                 st.success("OpenAI API Key dimuat dari Streamlit Secrets.")
             else:
                 api_key = st.text_input(
-                    "OpenAI API Key",
-                    type="password",
-                    value="",
-                    placeholder="sk-...",
-                    help="Key hanya dipakai saat tombol Generate ditekan dan tidak ditulis ke cache/file aplikasi.",
-                    key="openai_api_key",
+                    "OpenAI API Key", type="password", value="", placeholder="sk-...",
+                    help="Key hanya dipakai untuk request AI dan tidak disimpan ke dataset/cache.", key="presentation_openai_api_key",
                 )
             c1, c2, c3 = st.columns(3)
-            model = c1.selectbox(
-                "Model",
-                ["gpt-5.6"],
-                index=0,
-                help="Model OpenAI yang digunakan oleh generator insight.",
-                key="openai_model",
-            )
+            model = c1.selectbox("Model", ["gpt-5.6"], index=0, key="presentation_openai_model")
 
         audience = c2.selectbox(
             "Audience",
             ["Management / Owner", "Buyer & Inventory", "Store Operations"],
             index=0,
-            key=f"audience_{provider}",
+            key="presentation_audience",
+            help="Audience mengubah penekanan insight dan rekomendasi slide.",
         )
         language = c3.selectbox(
-            "Bahasa Presentasi",
-            ["Bahasa Indonesia", "English"],
-            index=0,
-            key=f"language_{provider}",
+            "Bahasa Presentasi", ["Bahasa Indonesia", "English"], index=0, key="presentation_language"
         )
 
         runtime = ai_runtime_info()
-        if provider == "gemini":
-            transport = "Google GenAI SDK" if runtime["gemini_sdk"] else "HTTPS fallback (SDK tidak diperlukan)"
-        else:
-            transport = "OpenAI Python SDK" if runtime["openai_sdk"] else "HTTPS fallback (SDK tidak diperlukan)"
-        ppt_status = "siap" if runtime["python_pptx"] else "belum terinstall"
-        st.caption(f"Runtime AI: {transport} · PowerPoint engine: {ppt_status}")
+        transport = (
+            "Google GenAI SDK" if provider == "gemini" and runtime["gemini_sdk"] else
+            "OpenAI Python SDK" if provider == "openai" and runtime["openai_sdk"] else
+            "HTTPS fallback"
+        )
+        st.caption(f"Runtime AI: {transport} · PowerPoint engine: {'siap' if runtime['python_pptx'] else 'belum terinstall'}")
 
-        if provider == "gemini" and not runtime["gemini_sdk"]:
-            st.caption("Catatan: Gemini tetap dapat berjalan melalui HTTPS fallback. Jalankan setup_windows.bat untuk memasang Google GenAI SDK.")
-        if not runtime["python_pptx"]:
-            st.warning(
-                "Package python-pptx belum tersedia di Python yang sedang menjalankan aplikasi. "
-                "Jalankan setup_windows.bat sekali."
+    context = advanced_presentation_context(bundle, as_of, location)
+    target = context.get("target", {}) or {}
+    m = st.columns(4)
+    m[0].metric("Net Sales MTD", rupiah(context["kpi"].get("net_sales")))
+    m[1].metric("Target", rupiah(target.get("target")) if target else "-")
+    m[2].metric("Projected Gap", rupiah(target.get("projected_gap")) if target else "-")
+    m[3].metric("Core 20 Share", pct(context.get("pareto", {}).get("core_share")))
+
+    with st.expander("2. Presentation Brief", expanded=True):
+        if "presentation_objective" not in st.session_state:
+            st.session_state["presentation_objective"] = (
+                "Evaluasi performa cabang, menjelaskan gap terhadap target, dan menentukan tindakan paling realistis "
+                "untuk meningkatkan revenue tanpa memperburuk margin maupun kesehatan inventory."
             )
+        objective = st.text_area(
+            "Tujuan Presentasi",
+            height=92,
+            key="presentation_objective",
+        )
+        depth = st.selectbox(
+            "Kedalaman Presentasi",
+            list(PRESENTATION_DEPTHS.keys()),
+            index=1,
+            key="presentation_depth",
+            help="Executive cocok untuk meeting singkat; Deep Dive cocok untuk evaluasi buyer/inventory yang lebih detail.",
+        )
+        default_focus = recommended_focus_for_audience(audience)
+        focus_areas = st.multiselect(
+            "Fokus / Topik yang Ingin Dibahas",
+            PRESENTATION_FOCUS_OPTIONS,
+            default=default_focus,
+            key=f"presentation_focus_{audience}",
+            help="Topik yang dipilih menjadi kandidat slide. AI tetap akan menghindari slide yang tidak didukung data.",
+        )
+        if "presentation_additional_points" not in st.session_state:
+            st.session_state["presentation_additional_points"] = ""
+        additional_points = st.text_area(
+            "Poin Tambahan yang Wajib Dibahas",
+            placeholder=(
+                "Contoh:\n"
+                "1. Jelaskan penyebab cabang belum mencapai target berdasarkan data yang tersedia.\n"
+                "2. Fokuskan 20% Core Product dan Opportunity Product yang paling realistis didorong.\n"
+                "3. Cari produk stockout dengan histori revenue tinggi.\n"
+                "4. Evaluasi supplier dengan inventory share besar tetapi revenue share rendah.\n"
+                "5. Berikan maksimal 10 tindakan konkret untuk 30 hari ke depan."
+            ),
+            height=150,
+            key="presentation_additional_points",
+        )
+        st.caption(
+            "Brief ini masuk ke prompt AI sebagai **mandatory presentation brief**, tetapi AI tetap dilarang mengarang fakta yang tidak ada di context aplikasi."
+        )
 
-    context = presentation_context(bundle, as_of, location)
-    target = context.get("target", {})
-    c = st.columns(4)
-    c[0].metric("Net Sales MTD", rupiah(context["kpi"]["net_sales"]))
-    c[1].metric("Target", rupiah(target.get("target")) if target else "-")
-    c[2].metric("Projected Gap", rupiah(target.get("projected_gap")) if target else "-")
-    c[3].metric("Core 20 Share", pct(context["pareto"]["core_share"]))
-
+    st.subheader("3. Generate & Review Slide Plan")
     st.caption(
-        "Preview data yang dikirim ke AI: KPI agregat, tren bulanan, top opportunity/Core products, "
-        "inventory summary, supplier/category summary, dan anomaly counts. Raw transaction tidak dikirim."
+        "AI menyusun urutan cerita terlebih dahulu. Anda dapat mengedit judul, objective, emphasis, urutan, menghapus slide, atau menambah slide sebelum PowerPoint final dibuat."
     )
-
-    provider_button = "Gemini" if provider == "gemini" else "OpenAI"
-    if st.button(
-        f"✨ Generate {provider_button} Insights & PowerPoint",
+    p1, p2, p3 = st.columns([1.6, 1.6, 1])
+    generate_plan = p1.button(
+        "🧠 Generate AI Slide Plan",
         type="primary",
         use_container_width=True,
-        disabled=not bool(api_key.strip()),
-    ):
-        with st.spinner(
-            f"{provider_button} sedang menyusun insight; setelah itu aplikasi membangun file PowerPoint secara lokal..."
-        ):
+        disabled=not bool(str(api_key).strip()),
+    )
+    local_plan = p2.button("📋 Gunakan Recommended Plan", use_container_width=True)
+    reset_plan = p3.button("Reset", use_container_width=True)
+
+    if reset_plan:
+        for k in ["presentation_slide_plan", "presentation_dynamic_ai", "presentation_dynamic_pptx"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    if generate_plan:
+        with st.spinner(f"{provider_label} sedang menyusun arsitektur presentasi..."):
             try:
-                ai = generate_ai_insights(
-                    api_key.strip(),
-                    model,
-                    context,
-                    audience=audience,
-                    language=language,
-                    provider=provider,
+                plan = generate_ai_slide_plan(
+                    str(api_key).strip(), model, context,
+                    audience=audience, language=language, objective=objective,
+                    focus_areas=focus_areas, additional_points=additional_points,
+                    depth=depth, provider=provider,
                 )
-                pptx_bytes = build_pptx(context, ai, branch=location, as_of=as_of, audience=audience)
-                st.session_state["last_ai_insights"] = ai
-                st.session_state["last_pptx"] = pptx_bytes
-                st.session_state["last_ai_provider"] = provider_button
-                st.success(f"Presentation berhasil dibuat menggunakan {provider_button}.")
+                st.session_state["presentation_slide_plan"] = plan
+                st.session_state.pop("presentation_dynamic_ai", None)
+                st.session_state.pop("presentation_dynamic_pptx", None)
+                st.success(f"Slide plan dibuat: {len(plan)} slide. Silakan review/edit sebelum generate final deck.")
             except Exception as exc:
-                message = str(exc)
-                lower = message.lower()
+                st.error(f"Gagal membuat AI Slide Plan: {exc}")
+
+    if local_plan:
+        plan = build_recommended_slide_plan(focus_areas, depth, audience)
+        st.session_state["presentation_slide_plan"] = plan
+        st.session_state.pop("presentation_dynamic_ai", None)
+        st.session_state.pop("presentation_dynamic_pptx", None)
+        st.success(f"Recommended slide plan dibuat: {len(plan)} slide.")
+
+    plan = st.session_state.get("presentation_slide_plan")
+    edited_plan = None
+    if plan:
+        plan_df = pd.DataFrame(plan)
+        edited_df = st.data_editor(
+            plan_df,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="presentation_plan_editor",
+            column_config={
+                "include": st.column_config.CheckboxColumn("Include", default=True, width="small"),
+                "order": st.column_config.NumberColumn("Order", min_value=1, step=1, width="small"),
+                "slide_type": st.column_config.SelectboxColumn(
+                    "Slide Type", options=list(SLIDE_LIBRARY.keys()), required=True, width="medium"
+                ),
+                "title": st.column_config.TextColumn("Slide Title", width="large"),
+                "objective": st.column_config.TextColumn("Objective", width="large"),
+                "emphasis": st.column_config.TextColumn("Emphasis / Notes", width="large"),
+            },
+        )
+        edited_plan = normalize_slide_plan(edited_df.to_dict("records"), depth)
+        st.caption(f"Final plan saat ini: **{len(edited_plan)} slide** · maksimal {PRESENTATION_DEPTHS.get(depth, 14)} slide sesuai depth.")
+        with st.expander("Preview urutan slide", expanded=False):
+            preview = pd.DataFrame(edited_plan)[["order", "slide_type", "title", "objective", "emphasis"]]
+            show_table(preview)
+
+    st.subheader("4. Generate Final AI Insights & PowerPoint")
+    st.caption(
+        "Tahap ini meminta AI menulis insight spesifik untuk setiap slide yang sudah Anda approve. Chart, KPI, tabel, dan nominal tetap dibangun dari fact-pack aplikasi."
+    )
+    final_button = st.button(
+        f"✨ Generate Final Deck with {provider_label}",
+        type="primary",
+        use_container_width=True,
+        disabled=not (bool(str(api_key).strip()) and bool(edited_plan)),
+    )
+    if final_button:
+        with st.spinner("AI sedang menyusun slide-specific insight lalu aplikasi membangun PowerPoint dinamis..."):
+            try:
+                ai = generate_dynamic_presentation_content(
+                    str(api_key).strip(), model, context, edited_plan,
+                    audience=audience, language=language, objective=objective,
+                    additional_points=additional_points, provider=provider,
+                )
+                pptx_bytes = build_dynamic_pptx(
+                    context, ai, edited_plan, branch=location, as_of=as_of,
+                    audience=audience, objective=objective,
+                )
+                st.session_state["presentation_slide_plan"] = edited_plan
+                st.session_state["presentation_dynamic_ai"] = ai
+                st.session_state["presentation_dynamic_pptx"] = pptx_bytes
+                st.session_state["presentation_dynamic_provider"] = provider_label
+                st.success(f"Dynamic presentation berhasil dibuat menggunakan {provider_label}.")
+            except Exception as exc:
+                message = str(exc); lower = message.lower()
                 if "429" in lower or "quota" in lower or "insufficient_quota" in lower:
-                    st.error(
-                        f"{provider_button} tidak dapat memproses request karena quota/limit API. "
-                        "Periksa quota atau billing provider, atau pilih provider AI lainnya."
-                    )
+                    st.error(f"{provider_label} tidak dapat memproses request karena quota/limit API.")
                     st.caption(message)
                 elif "401" in lower or "403" in lower or "api key" in lower:
-                    st.error(f"{provider_button} menolak API key/request. Periksa API key dan akses model.")
+                    st.error(f"{provider_label} menolak API key/request. Periksa key dan akses model.")
                     st.caption(message)
                 else:
-                    st.error(f"Gagal membuat AI insight: {message}")
+                    st.error(f"Gagal membuat dynamic AI presentation: {message}")
 
-    ai = st.session_state.get("last_ai_insights")
-    pptx_bytes = st.session_state.get("last_pptx")
-    last_provider = st.session_state.get("last_ai_provider")
+    ai = st.session_state.get("presentation_dynamic_ai")
+    pptx_bytes = st.session_state.get("presentation_dynamic_pptx")
+    last_provider = st.session_state.get("presentation_dynamic_provider")
     if ai:
-        section_title(f"AI Executive Summary{f' · {last_provider}' if last_provider else ''}")
-        for item in ai.get("executive_summary", []):
-            st.write(f"• {item}")
-        section_title("Recommended Actions")
+        section_title(f"AI Presentation Readout{f' · {last_provider}' if last_provider else ''}")
+        takeaway = ai.get("executive_takeaway")
+        if takeaway:
+            st.info(takeaway)
+        slide_rows = []
+        for item in ai.get("slides", []):
+            slide_rows.append({
+                "slide_type": item.get("slide_type"),
+                "title": item.get("title"),
+                "headline": item.get("headline"),
+                "risk_note": item.get("risk_note"),
+                "action_note": item.get("action_note"),
+            })
+        if slide_rows:
+            with st.expander("Preview AI headline per slide", expanded=False):
+                show_table(pd.DataFrame(slide_rows))
         actions = pd.DataFrame(ai.get("recommended_actions", []))
         if not actions.empty:
+            section_title("30-Day Recommended Actions")
             show_table(actions)
+
     if pptx_bytes:
         st.download_button(
-            "⬇️ Download PowerPoint (.pptx)",
+            "⬇️ Download Dynamic PowerPoint (.pptx)",
             data=pptx_bytes,
-            file_name=f"INDOKIDS_{location}_{pd.Timestamp(as_of):%Y%m%d}_AI_Management_Brief.pptx",
+            file_name=f"INDOKIDS_{location}_{pd.Timestamp(as_of):%Y%m%d}_AI_Presentation_Studio.pptx",
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             use_container_width=True,
         )
 
+    with st.expander("Prompt governance & data privacy", expanded=False):
+        st.markdown(
+            """
+**AI menerima:** KPI agregat, target & forecast, tren bulanan/harian, Pareto, product opportunity, inventory health/capital, supplier/category productivity, transfer/purchase summary, profitability, dan anomaly counts.  
+**AI tidak menerima:** seluruh raw transaction secara langsung.  
+**Governance:** AI dilarang mengarang angka/kausalitas; jika penyebab tidak terbukti, harus diposisikan sebagai hipotesis atau investigasi yang direkomendasikan.  
+**PowerPoint builder:** chart, tabel, KPI, dan nominal dibuat oleh aplikasi dari analytics context; AI fokus pada story, headline, interpretation, dan action plan.
+            """
+        )
 
 def render_data_anomaly(bundle: AnalysisBundle, as_of: pd.Timestamp):
     st.title("Data & Anomaly Center")
